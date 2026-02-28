@@ -202,14 +202,49 @@ if run:
                     new_cell.protection  = copy(cell.protection)
                     new_cell.alignment = copy(cell.alignment)
 
-        # シート全体のデフォルト列幅・行高をコピー（明示設定のない列もこのサイズになる）
-        ws_dst.sheet_format.defaultColWidth  = ws_src.sheet_format.defaultColWidth
+        # ── X列(24列)行7-18の塗り・Y列(25列)行7-12の値をクリア ──
+        from openpyxl.styles import PatternFill as PF
+        NO_FILL = PF(fill_type=None)
+        for r in range(7, 19):
+            cell = ws_dst.cell(row=r, column=24)
+            cell.fill  = PF(fill_type=None)
+            cell.value = None
+        for r in range(7, 13):
+            cell = ws_dst.cell(row=r, column=25)
+            cell.value = None
+            cell.fill  = PF(fill_type=None)
+
+        # ── 全セルにフォント11pt・中央揃えを適用 ──
+        from openpyxl.styles import Font, Alignment
+        CENTER = Alignment(horizontal="center", vertical="center")
+        for row in ws_dst.iter_rows():
+            for cell in row:
+                # フォントサイズだけ11ptに（太字・色などは元のまま保持）
+                orig_font = cell.font
+                cell.font = Font(
+                    name=orig_font.name or "Calibri",
+                    size=11,
+                    bold=orig_font.bold,
+                    italic=orig_font.italic,
+                    color=orig_font.color,
+                )
+                cell.alignment = CENTER
+
+        # ── 列幅・行高を均一設定（47px=6.0単位、18px=1.857単位）──
+        # 全列を一律に設定するためdefaultColWidthは使わず明示的に全列設定
+        COL_WIDE  = 6.0      # 47px相当
+        COL_NARROW = 1.857   # 18px相当
+        # まず全列をデフォルト幅(6.0)でリセット
+        ws_dst.sheet_format.defaultColWidth = COL_WIDE
         ws_dst.sheet_format.defaultRowHeight = ws_src.sheet_format.defaultRowHeight
         ws_dst.sheet_format.customHeight     = ws_src.sheet_format.customHeight
-
-        # 個別に設定された列幅・行高をコピー
+        # 元シートで幅が狭く設定されていた列のみ18px幅に
         for col, cd in ws_src.column_dimensions.items():
-            ws_dst.column_dimensions[col].width = cd.width
+            if cd.width is not None and cd.width < 3.0:
+                ws_dst.column_dimensions[col].width = COL_NARROW
+            else:
+                ws_dst.column_dimensions[col].width = COL_WIDE
+        # 行高はコピー
         for row, rd in ws_src.row_dimensions.items():
             ws_dst.row_dimensions[row].height = rd.height
 

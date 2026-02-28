@@ -261,29 +261,46 @@ if run:
         # ── 列幅・行高の設定 ──
         # 47px=6.0単位、31px=3.714単位
         COL_47PX = 5.1429   # 41px相当（デフォルト）
+        COL_38PX = 4.7143   # 38px相当
         COL_31PX = 3.7143   # 31px相当（指定範囲）
 
-        # 31pxにする列範囲を定義
+        # 列幅ごとの範囲を定義
         from openpyxl.utils import column_index_from_string, get_column_letter
         MAX_COL = ws_src.max_column
+
+        # 31px対象列
         RANGES_31PX = [
-            ("A", "N"), ("S", "Y"), ("AA", "AK"),
+            ("A", "M"), ("S", "Y"), ("AA", "AK"),
             ("CJ", "CS"), ("CU", "DC"), ("DI", get_column_letter(MAX_COL)),
         ]
-        cols_31px = set()
-        for s, e in RANGES_31PX:
-            for i in range(column_index_from_string(s), column_index_from_string(e) + 1):
-                cols_31px.add(i)
+        # 38px対象列
+        RANGES_38PX = [
+            ("N", "Z"), ("AL", "CI"), ("CT", "CT"), ("DD", "DH"),
+        ]
 
-        # defaultColWidthは41pxに設定（指定外の列はすべて41px）
+        def build_col_set(ranges):
+            cols = set()
+            for s, e in ranges:
+                for i in range(column_index_from_string(s), column_index_from_string(e) + 1):
+                    cols.add(i)
+            return cols
+
+        cols_31px = build_col_set(RANGES_31PX)
+        cols_38px = build_col_set(RANGES_38PX)
+
         ws_dst.sheet_format.defaultColWidth  = COL_47PX
         ws_dst.sheet_format.defaultRowHeight = ws_src.sheet_format.defaultRowHeight
         ws_dst.sheet_format.customHeight     = ws_src.sheet_format.customHeight
 
-        # 全列に対して明示的に幅を設定
+        # 全列に対して明示的に幅を設定（31px → 38px → 41px の優先順）
         for i in range(1, MAX_COL + 1):
             col_letter = get_column_letter(i)
-            ws_dst.column_dimensions[col_letter].width = COL_31PX if i in cols_31px else COL_47PX
+            if i in cols_31px:
+                ws_dst.column_dimensions[col_letter].width = COL_31PX
+            elif i in cols_38px:
+                ws_dst.column_dimensions[col_letter].width = COL_38PX
+            else:
+                ws_dst.column_dimensions[col_letter].width = COL_47PX
 
         # 行高はコピー
         for row, rd in ws_src.row_dimensions.items():

@@ -1,215 +1,215 @@
-streamlit を st としてインポート
-openpyxlをインポートする
-openpyxl.stylesからPatternFillをインポートする
-インポートio
-輸入再
-インポートコピー
+import streamlit as st
+import openpyxl
+from openpyxl.styles import PatternFill
+import io
+import re
+import copy
 
-st.set_page_config(page_title="座席マップ青塗りツール",layout="wide")
-st.title("🏟️座席マップ青塗りツール")
+st.set_page_config(page_title="座席マップ 青塗りツール", layout="wide")
+st.title("🏟️ 座席マップ 青塗りツール")
 st.caption("クラス名＋列＋座席番号を入力し、座席シートのセルを青色に塗りつぶします")
 
-# ──────────────────────────────────────────────
-#1. パース関数
-# ──────────────────────────────────────────────
-デフparse_seat_text(テキスト):
-    「」
-    テキストから (class_name, row_num, Seat_num) のリストを返す
+# ─────────────────────────────────────────────
+# 1. パース関数
+# ─────────────────────────────────────────────
+def parse_seat_text(text):
+    """
+    テキストから (class_name, row_num, seat_num) のリストを返す
     例:
-      Sクラス 南 1列33
-      クラスSS End-1 2列 8、9
-      クラスAサイド3列8,9
-    「」
-    結果 = []
+      Class S South 1列33
+      Class SS End-1 2列　8、9
+      Class A Side 3列8,9
+    """
+    results = []
 
-    # 変更または「クラス」の前で分割
-    #とりあえず全行を「授業」で分割して各エントリを処理
+    # 改行 or 「Class」の前で分割
+    # まず全行を「Class」で分割して各エントリを処理
     # 全角スペース→半角
-    テキスト = text.replace('\u3000', ' ').replace(' ', ' ')
+    text = text.replace('\u3000', ' ').replace('　', ' ')
 
-    #クラスで始まるブロックに分割
-    ブロック = re.split(r'(?=Class\s)', テキスト)
+    # Classで始まるブロックに分割
+    blocks = re.split(r'(?=Class\s)', text)
 
-    ブロック内のブロックの場合:
-        ブロック = block.strip()
-        ブロックしない場合:
-            続く
+    for block in blocks:
+        block = block.strip()
+        if not block:
+            continue
 
-        #クラス名パターン: SS-Tクラス / SSエンド-1 / Sクラス南 / Aクラスサイド など
+        # クラス名パターン: Class SS-T / Class SS End-1 / Class S South / Class A Side など
         # 列パターン: 数字 + 列
-        #座席パタ​​ーン: 数字（複数は "、" "、" "." で区切りまたは「25.26」のような形）
-        m = 再一致(
-            r'(クラス\s+\S+(?:\s+\S+)?)\s+(\d+)列\s*([\d\s、,．.・]+)',
-            ブロック
-        ）
-        mでない場合:
-            #クラス名が3時のパターン試行:クラスAエンド-1など
-            m = 再一致(
-                r'(クラス\s+\S+\s+\S+)\s+(\d+)列\s*([\d\s、,．.・]+)',
-                ブロック
-            ）
-        mでない場合:
-            続く
+        # 座席パターン: 数字（複数は "、" "," "." で区切り or "25.26" のような形）
+        m = re.match(
+            r'(Class\s+\S+(?:\s+\S+)?)\s+(\d+)列\s*([\d\s、,．.・]+)',
+            block
+        )
+        if not m:
+            # クラス名が3トークンのパターン試行: Class A End-1 など
+            m = re.match(
+                r'(Class\s+\S+\s+\S+)\s+(\d+)列\s*([\d\s、,．.・]+)',
+                block
+            )
+        if not m:
+            continue
 
-        クラス名 = m.group(1).strip()
+        class_name = m.group(1).strip()
         row_num = int(m.group(2))
         seat_str = m.group(3)
 
-        #座席番号を展開 (区切り文字: 、、 ．.)
+        # 座席番号を展開 (区切り文字: 、, ．.)
         seat_parts = re.split(r'[、,．.\s・]+', seat_str.strip())
-        seat_partsのspの場合:
+        for sp in seat_parts:
             sp = sp.strip()
-            sp.isdigit() の場合:
-                results.append((クラス名, 行番号, int(sp)))
+            if sp.isdigit():
+                results.append((class_name, row_num, int(sp)))
 
     # 重複排除
-    リストを返す(set(結果))
+    return list(set(results))
 
 
 def normalize_class(s):
     """連続スペースを1つにして比較用に正規化"""
-    re.sub(r'\s+', ' ', str(s).strip()) を返す
+    return re.sub(r'\s+', ' ', str(s).strip())
 
 
-# ──────────────────────────────────────────────
+# ─────────────────────────────────────────────
 # 2. UI
-# ──────────────────────────────────────────────
-日時をインポート
+# ─────────────────────────────────────────────
+import datetime
 
 col1, col2 = st.columns([1, 2])
 
-col1 の場合:
-    アップロード = st.file_uploader(
+with col1:
+    uploaded = st.file_uploader(
         "📂 ベースExcelをアップロード",
-        タイプ=["xlsx"],
-        help="25－26ブロックマップ_座席番号 / _列 / _クラスシートを含むファイル"
-    ）
+        type=["xlsx"],
+        help="25－26ブロックマップ_座席番号 / _列 / _クラス シートを含むファイル"
+    )
     game_date = st.date_input(
-        "📅試合日付",
-        値=datetime.date.today(),
+        "📅 試合日付",
+        value=datetime.date.today(),
         help="シート名・ファイル名に使用されます（例：1月1日 → 0101）"
-    ）
+    )
     date_str = game_date.strftime("%m%d")
     st.caption(f"シート名・ファイル名に使用される日付コード：**{date_str}**")
 
-col2の場合:
+with col2:
     seat_text = st.text_area(
-        "📝座席指定テキストを貼り付け",
-        高さ=200、
+        "📝 座席指定テキストを貼り付け",
+        height=200,
         placeholder="例:\nClass S South 1列33\nClass S South 1列5\nClass SS End-1 2列8、9"
-    ）
+    )
 
-run = st.button("🎨青塗り実行", type="primary",disabled=(アップロードはNoneまたはseat_text.strip()))
+run = st.button("🎨 青塗り実行", type="primary", disabled=(uploaded is None or not seat_text.strip()))
 
-# ──────────────────────────────────────────────
-#3. 処理
-# ──────────────────────────────────────────────
-実行する場合:
+# ─────────────────────────────────────────────
+# 3. 処理
+# ─────────────────────────────────────────────
+if run:
     with st.spinner("処理中..."):
-        #パース
-        座席 = parse_seat_text(座席テキスト)
-        座席がない場合:
-            st.error("座席指定を​​解析できませんでした。入力形式を確認してください。")
+        # パース
+        seats = parse_seat_text(seat_text)
+        if not seats:
+            st.error("座席指定を解析できませんでした。入力形式を確認してください。")
             st.stop()
 
-        st.write(f"**解析された座席数:** {len(seats)}件")
+        st.write(f"**解析された座席数:** {len(seats)} 件")
 
-        #エクセルロード
+        # Excelロード
         wb = openpyxl.load_workbook(io.BytesIO(uploaded.read()))
 
         required_sheets = ['25－26ブロックマップ_座席番号', '25－26ブロックマップ_列', '25－26ブロックマップ_クラス']
-        不足 = [wb.sheetnames に s がない場合、required_sheets に s がある]
-        欠落している場合:
+        missing = [s for s in required_sheets if s not in wb.sheetnames]
+        if missing:
             st.error(f"必要なシートが見つかりません: {missing}")
             st.stop()
 
-        ws_seat = wb['25－26ブロックマップ座席番号']
-        ws_row = wb['25－26マップブロック_列']
-        ws_class = wb['25－26マップブロック_クラス']
+        ws_seat  = wb['25－26ブロックマップ_座席番号']
+        ws_row   = wb['25－26ブロックマップ_列']
+        ws_class = wb['25－26ブロックマップ_クラス']
 
         BLUE_FILL = PatternFill("solid", fgColor="0000FF")
 
-        # セル座標マップ構築: (class_name, row_val, Seat_val) -> (r, c)
-        #全セルを走らせてインデックス化
-        座標マップ = {}
+        # セル座標マップ構築: (class_name, row_val, seat_val) -> (r, c)
+        # 全セルを走査してインデックス化
+        coord_map = {}
         max_row = ws_class.max_row
         max_col = ws_class.max_column
 
-        rが範囲(1, max_row + 1)内にある場合:
-            cが範囲(1, max_col + 1)内にある場合:
-                cv = ws_class.cell(行=r、列=c).value
-                rv = ws_row.cell(行=r、列=c).value
-                sv = ws_seat.cell(行=r、列=c).value
+        for r in range(1, max_row + 1):
+            for c in range(1, max_col + 1):
+                cv = ws_class.cell(row=r, column=c).value
+                rv = ws_row.cell(row=r, column=c).value
+                sv = ws_seat.cell(row=r, column=c).value
 
-                cv が None または rv が None または sv が None の場合:
-                    続く
+                if cv is None or rv is None or sv is None:
+                    continue
 
                 cv_norm = normalize_class(str(cv))
-                試す：
+                try:
                     rv_int = int(rv)
-                (ValueError、TypeError) を除く:
-                    続く
-                試す：
+                except (ValueError, TypeError):
+                    continue
+                try:
                     sv_int = int(sv)
-                (ValueError、TypeError) を除く:
-                    続く
+                except (ValueError, TypeError):
+                    continue
 
-                座標マップ[(cv_norm, rv_int, sv_int)] = (r, c)
+                coord_map[(cv_norm, rv_int, sv_int)] = (r, c)
 
-        #突合＆塗り
-        一致 = []
-        一致しない = []
+        # 突合＆塗り
+        matched = []
+        unmatched = []
 
-        座席数内の (class_name, row_num, seat_num) について:
-            キー = (normalize_class(クラス名), 行番号, 座席番号)
-            coord_map のキーの場合:
-                r, c = 座標マップ[キー]
-                ws_seat.cell(行=r、列=c).fill = BLUE_FILL
-                一致しました。追加({
-                    "クラス": クラス名,
+        for (class_name, row_num, seat_num) in seats:
+            key = (normalize_class(class_name), row_num, seat_num)
+            if key in coord_map:
+                r, c = coord_map[key]
+                ws_seat.cell(row=r, column=c).fill = BLUE_FILL
+                matched.append({
+                    "クラス": class_name,
                     "列": row_num,
-                    "座席": Seat_num,
+                    "座席": seat_num,
                     "セル": f"R{r}C{c}"
                 })
-            それ以外：
-                一致しない.追加({
-                    "クラス": クラス名,
+            else:
+                unmatched.append({
+                    "クラス": class_name,
                     "列": row_num,
-                    "座席": 席番号
+                    "座席": seat_num
                 })
 
-        #出力：座席番号シートだけを新しいワークブックにコピーして出力
-        openpyxlからワークブックをインポート
-        openpyxl.utils から get_column_letter をインポートします
-        コピーからインポートコピー
+        # 出力：座席番号シートだけを新しいワークブックにコピーして出力
+        from openpyxl import Workbook
+        from openpyxl.utils import get_column_letter
+        from copy import copy
 
-        wb_out = ワークブック()
-        wb_out.remove(wb_out.active) #いつかシートを削除
+        wb_out = Workbook()
+        wb_out.remove(wb_out.active)  # デフォルトシートを削除
 
-        #座席番号シートをコピー
+        # 座席番号シートをコピー
         ws_src = ws_seat
-        ws_dst = wb_out.create_sheet(date_str) # シート名を日付4桁に
+        ws_dst = wb_out.create_sheet(date_str)  # シート名を日付4桁に
 
-        #セルの値・スタイルをコピー
-        ws_src.iter_rows() の行に対して:
-            行のセルに対して:
-                new_cell = ws_dst.cell(行 = cell.row、列 = cell.column、値 = cell.value)
-                cell.has_style の場合:
-                    new_cell.font = コピー(cell.font)
-                    new_cell.border = コピー(cell.border)
-                    new_cell.fill = コピー(cell.fill)
-                    new_cell.number_format = セル.number_format
-                    new_cell.protection = コピー(cell.protection)
-                    new_cell.alignment = コピー(cell.alignment)
+        # セルの値・スタイルをコピー
+        for row in ws_src.iter_rows():
+            for cell in row:
+                new_cell = ws_dst.cell(row=cell.row, column=cell.column, value=cell.value)
+                if cell.has_style:
+                    new_cell.font      = copy(cell.font)
+                    new_cell.border    = copy(cell.border)
+                    new_cell.fill      = copy(cell.fill)
+                    new_cell.number_format = cell.number_format
+                    new_cell.protection  = copy(cell.protection)
+                    new_cell.alignment = copy(cell.alignment)
 
-        #列幅・行高をコピー
-        ws_src.column_dimensions の col について:
+        # 列幅・行高をコピー
+        for col in ws_src.column_dimensions:
             ws_dst.column_dimensions[col].width = ws_src.column_dimensions[col].width
-        ws_src.row_dimensions の行の場合:
-            ws_dst.row_dimensions[行].height = ws_src.row_dimensions[行].height
+        for row in ws_src.row_dimensions:
+            ws_dst.row_dimensions[row].height = ws_src.row_dimensions[row].height
 
-        #結合セルをコピー
-        ws_src.merged_cells.ranges の結合の場合:
+        # 結合セルをコピー
+        for merge in ws_src.merged_cells.ranges:
             ws_dst.merge_cells(str(merge))
 
         out_buf = io.BytesIO()
@@ -219,71 +219,71 @@ run = st.button("🎨青塗り実行", type="primary",disabled=(アップロー�
         original_name = uploaded.name.replace(".xlsx", "")
         out_name = f"{original_name}_{date_str}_blue_marked.xlsx"
 
-    # ──────────────────────────────────────────────
-    #4. 結果表示
-    # ──────────────────────────────────────────────
-    st.success(f"✅完了！ 塗り: {len(matched)}件 / 未一致: {len(unmatched)}件")
+    # ─────────────────────────────────────────────
+    # 4. 結果表示
+    # ─────────────────────────────────────────────
+    st.success(f"✅ 完了！ 塗り: {len(matched)}件 / 未一致: {len(unmatched)}件")
 
-    col_a、col_b = st.columns(2)
+    col_a, col_b = st.columns(2)
 
-    col_a の場合:
-        st.subheader(f"✅塗られた席（{len(matched)}件）")
-        一致した場合:
-            st.dataframe(一致、use_container_width=True)
-        それ以外：
+    with col_a:
+        st.subheader(f"✅ 塗れた席（{len(matched)}件）")
+        if matched:
+            st.dataframe(matched, use_container_width=True)
+        else:
             st.info("一致なし")
 
-    col_b の場合:
-        st.subheader(f"❌塗れなかった席（{len(unmatched)}件）")
-        一致しない場合:
-            st.dataframe(不一致、use_container_width=True)
+    with col_b:
+        st.subheader(f"❌ 塗れなかった席（{len(unmatched)}件）")
+        if unmatched:
+            st.dataframe(unmatched, use_container_width=True)
             st.caption("クラス名・列・座席番号がデータに存在しない可能性があります")
-        それ以外：
+        else:
             st.success("すべての座席が一致しました！")
 
     st.download_button(
-        label="⬇️出力Excelをダウンロード",
-        データ=out_buf、
-        ファイル名=出力名、
+        label="⬇️ 出力Excelをダウンロード",
+        data=out_buf,
+        file_name=out_name,
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        タイプ="プライマリ"
-    ）
+        type="primary"
+    )
 
-# ──────────────────────────────────────────────
+# ─────────────────────────────────────────────
 # サイドバー: ヘルプ
-# ──────────────────────────────────────────────
-st.sidebar 付き:
-    st.header("📖入力形式")
-    st.マークダウン("""
-**基本的な形式:**
-「」
-クラス名列番号列座席番号
-「」
+# ─────────────────────────────────────────────
+with st.sidebar:
+    st.header("📖 入力形式")
+    st.markdown("""
+**基本形式:**
+```
+クラス名 列数字列 座席番号
+```
 
 **使用例:**
-「」
-Sクラス 南 1列33
-Sクラス 南 1列5
-クラスSS End-1 2列8、9
-クラスAサイド3列8,9
-「」
+```
+Class S South 1列33
+Class S South 1列5
+Class SS End-1 2列8、9
+Class A Side 3列8,9
+```
 
 **複数座席の区切り文字:**
 - 読点: `8、9`
-- カンマ: 「8,9」
+- カンマ: `8,9`
 - スペース: `8 9`
-- ピリオド: 「25.26」
+- ピリオド: `25.26`
 
 **利用可能なクラス名:**
-- Sクラス南
-- クラスSサイド
-- クラスS エンド1 / エンド2
-- クラスSSサイド
-- クラスSS エンド1 / エンド2
-- SS-Tクラス
-- クラスAサウス
-- クラスAサイド
-- クラスA エンド1 / エンド2
-- クラスBサイド
-- クラスB エンド1 / エンド2
-「」）
+- Class S South
+- Class S Side
+- Class S End-1 / End-2
+- Class SS Side
+- Class SS End-1 / End-2
+- Class SS-T
+- Class A South
+- Class A Side
+- Class A End-1 / End-2
+- Class B Side
+- Class B End-1 / End-2
+""")

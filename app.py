@@ -230,20 +230,33 @@ if run:
                 )
                 cell.alignment = CENTER
 
-        # ── 列幅・行高を均一設定（47px=6.0単位、18px=1.857単位）──
-        # 全列を一律に設定するためdefaultColWidthは使わず明示的に全列設定
-        COL_WIDE  = 6.0      # 47px相当
-        COL_NARROW = 1.857   # 18px相当
-        # まず全列をデフォルト幅(6.0)でリセット
-        ws_dst.sheet_format.defaultColWidth = COL_WIDE
+        # ── 列幅・行高の設定 ──
+        # 47px=6.0単位、31px=3.714単位
+        COL_47PX = 6.0      # 47px相当（デフォルト）
+        COL_31PX = 3.7143   # 31px相当（指定範囲）
+
+        # 31pxにする列範囲を定義
+        from openpyxl.utils import column_index_from_string, get_column_letter
+        MAX_COL = ws_src.max_column
+        RANGES_31PX = [
+            ("A", "N"), ("S", "Y"), ("AA", "AK"),
+            ("CJ", "CS"), ("CU", "DC"), ("DI", get_column_letter(MAX_COL)),
+        ]
+        cols_31px = set()
+        for s, e in RANGES_31PX:
+            for i in range(column_index_from_string(s), column_index_from_string(e) + 1):
+                cols_31px.add(i)
+
+        # defaultColWidthは47pxに設定（指定外の列はすべて47px）
+        ws_dst.sheet_format.defaultColWidth  = COL_47PX
         ws_dst.sheet_format.defaultRowHeight = ws_src.sheet_format.defaultRowHeight
         ws_dst.sheet_format.customHeight     = ws_src.sheet_format.customHeight
-        # 元シートで幅が狭く設定されていた列のみ18px幅に
-        for col, cd in ws_src.column_dimensions.items():
-            if cd.width is not None and cd.width < 3.0:
-                ws_dst.column_dimensions[col].width = COL_NARROW
-            else:
-                ws_dst.column_dimensions[col].width = COL_WIDE
+
+        # 全列に対して明示的に幅を設定
+        for i in range(1, MAX_COL + 1):
+            col_letter = get_column_letter(i)
+            ws_dst.column_dimensions[col_letter].width = COL_31PX if i in cols_31px else COL_47PX
+
         # 行高はコピー
         for row, rd in ws_src.row_dimensions.items():
             ws_dst.row_dimensions[row].height = rd.height

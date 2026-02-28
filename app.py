@@ -202,11 +202,16 @@ if run:
                     new_cell.protection  = copy(cell.protection)
                     new_cell.alignment = copy(cell.alignment)
 
-        # 列幅・行高をコピー
-        for col in ws_src.column_dimensions:
-            ws_dst.column_dimensions[col].width = ws_src.column_dimensions[col].width
-        for row in ws_src.row_dimensions:
-            ws_dst.row_dimensions[row].height = ws_src.row_dimensions[row].height
+        # シート全体のデフォルト列幅・行高をコピー（明示設定のない列もこのサイズになる）
+        ws_dst.sheet_format.defaultColWidth  = ws_src.sheet_format.defaultColWidth
+        ws_dst.sheet_format.defaultRowHeight = ws_src.sheet_format.defaultRowHeight
+        ws_dst.sheet_format.customHeight     = ws_src.sheet_format.customHeight
+
+        # 個別に設定された列幅・行高をコピー
+        for col, cd in ws_src.column_dimensions.items():
+            ws_dst.column_dimensions[col].width = cd.width
+        for row, rd in ws_src.row_dimensions.items():
+            ws_dst.row_dimensions[row].height = rd.height
 
         # 結合セルをコピー
         for merge in ws_src.merged_cells.ranges:

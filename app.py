@@ -206,32 +206,24 @@ if run:
                     "座席": seat_num
                 })
 
-        # 出力：copy_worksheet で高速コピー（同一WB内でコピー後、不要シートを削除）
+        # 出力：セルを1つずつコピー（列幅を確実に指定通りに保つため）
+        from openpyxl import Workbook
         from openpyxl.styles import PatternFill as PF, Font, Alignment
-        from openpyxl.utils import get_column_letter
+        from openpyxl.utils import column_index_from_string, get_column_letter
+        from copy import copy as style_copy
 
         ws_src = ws_seat
-        ws_dst = wb.copy_worksheet(ws_src)
-        ws_dst.title = date_str  # シート名を日付4桁に
+        wb_out = Workbook()
+        wb_out.remove(wb_out.active)
+        ws_dst = wb_out.create_sheet(date_str)
 
-        # 不要シートをすべて削除（座席番号コピー以外）
-        for sname in list(wb.sheetnames):
-            if sname != date_str:
-                del wb[sname]
-
-        # ── X列(24列)行7-18の塗り・Y列(25列)行7-12の値をクリア ──
-        for r in range(7, 19):
-            ws_dst.cell(row=r, column=24).fill  = PF(fill_type=None)
-            ws_dst.cell(row=r, column=24).value = None
-        for r in range(7, 13):
-            ws_dst.cell(row=r, column=25).value = None
-            ws_dst.cell(row=r, column=25).fill  = PF(fill_type=None)
-
-        # ── 全セルにフォント11pt・中央揃えを適用（フォントキャッシュで高速化）──
+        # ── セルの値・スタイルをコピー（フォントキャッシュで高速化）──
         CENTER = Alignment(horizontal="center", vertical="center")
         FONT_CACHE = {}
-        for row in ws_dst.iter_rows():
+        for row in ws_src.iter_rows():
             for cell in row:
+                new_cell = ws_dst.cell(row=cell.row, column=cell.column, value=cell.value)
+                # フォント（11pt固定・他属性は元のまま）
                 orig = cell.font
                 try:
                     rgb = orig.color.rgb if orig.color and orig.color.type == 'rgb' else None
@@ -243,25 +235,35 @@ if run:
                         name=orig.name or "Calibri", size=11,
                         bold=orig.bold, italic=orig.italic, color=orig.color,
                     )
-                cell.font = FONT_CACHE[key]
-                cell.alignment = CENTER
+                new_cell.font      = FONT_CACHE[key]
+                new_cell.alignment = CENTER
+                if cell.has_style:
+                    new_cell.border        = style_copy(cell.border)
+                    new_cell.fill          = style_copy(cell.fill)
+                    new_cell.number_format = cell.number_format
 
-        # ── 列幅・行高の設定 ──
-        # 47px=6.0単位、31px=3.714単位
-        COL_47PX = 5.1429   # 41px相当（デフォルト）
-        COL_38PX = 4.7143   # 38px相当
-        COL_31PX = 3.7143   # 31px相当（指定範囲）
+        # ── X列(24列)行7-18の塗り・Y列(25列)行7-12の値をクリア ──
+        for r in range(7, 19):
+            ws_dst.cell(row=r, column=24).fill  = PF(fill_type=None)
+            ws_dst.cell(row=r, column=24).value = None
+        for r in range(7, 13):
+            ws_dst.cell(row=r, column=25).value = None
+            ws_dst.cell(row=r, column=25).fill  = PF(fill_type=None)
 
-        # 列幅ごとの範囲を定義
-        from openpyxl.utils import column_index_from_string, get_column_letter
-        MAX_COL = ws_src.max_column
+        # ── 結合セルをコピー ──
+        for merge in ws_src.merged_cells.ranges:
+            ws_dst.merge_cells(str(merge))
 
-        # 31px対象列
+        # ── 列幅の設定（31px / 38px / 41px）──
+        COL_41PX = 5.1429
+        COL_38PX = 4.7143
+        COL_31PX = 3.7143
+        MAX_COL  = ws_src.max_column
+
         RANGES_31PX = [
             ("A", "M"), ("S", "Y"), ("AA", "AK"),
             ("CJ", "CS"), ("CU", "DC"), ("DI", get_column_letter(MAX_COL)),
         ]
-        # 38px対象列
         RANGES_38PX = [
             ("N", "Z"), ("AL", "CI"), ("CT", "CT"), ("DD", "DH"),
         ]
@@ -276,11 +278,10 @@ if run:
         cols_31px = build_col_set(RANGES_31PX)
         cols_38px = build_col_set(RANGES_38PX)
 
-        ws_dst.sheet_format.defaultColWidth  = COL_47PX
+        ws_dst.sheet_format.defaultColWidth  = COL_41PX
         ws_dst.sheet_format.defaultRowHeight = ws_src.sheet_format.defaultRowHeight
         ws_dst.sheet_format.customHeight     = ws_src.sheet_format.customHeight
 
-        # 全列に対して明示的に幅を設定（31px → 38px → 41px の優先順）
         for i in range(1, MAX_COL + 1):
             col_letter = get_column_letter(i)
             if i in cols_31px:
@@ -288,15 +289,15 @@ if run:
             elif i in cols_38px:
                 ws_dst.column_dimensions[col_letter].width = COL_38PX
             else:
-                ws_dst.column_dimensions[col_letter].width = COL_47PX
+                ws_dst.column_dimensions[col_letter].width = COL_41PX
 
-        # 行高はコピー
+        # ── 行高をコピー ──
         for row, rd in ws_src.row_dimensions.items():
             ws_dst.row_dimensions[row].height = rd.height
 
 
         out_buf = io.BytesIO()
-        wb.save(out_buf)
+        wb_out.save(out_buf)
         out_buf.seek(0)
 
         out_name = f"{source_name}_{date_str}_blue_marked.xlsx"

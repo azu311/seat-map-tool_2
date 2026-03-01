@@ -296,7 +296,7 @@ if run:
 
 
         out_buf = io.BytesIO()
-        wb_out.save(out_buf)
+        wb.save(out_buf)
         out_buf.seek(0)
 
         out_name = f"{source_name}_{date_str}_blue_marked.xlsx"

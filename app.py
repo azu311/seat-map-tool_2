@@ -206,56 +206,44 @@ if run:
                     "座席": seat_num
                 })
 
-        # 出力：座席番号シートだけを新しいワークブックにコピーして出力
-        from openpyxl import Workbook
+        # 出力：copy_worksheet で高速コピー（同一WB内でコピー後、不要シートを削除）
+        from openpyxl.styles import PatternFill as PF, Font, Alignment
         from openpyxl.utils import get_column_letter
-        from copy import copy
 
-        wb_out = Workbook()
-        wb_out.remove(wb_out.active)  # デフォルトシートを削除
-
-        # 座席番号シートをコピー
         ws_src = ws_seat
-        ws_dst = wb_out.create_sheet(date_str)  # シート名を日付4桁に
+        ws_dst = wb.copy_worksheet(ws_src)
+        ws_dst.title = date_str  # シート名を日付4桁に
 
-        # セルの値・スタイルをコピー
-        for row in ws_src.iter_rows():
-            for cell in row:
-                new_cell = ws_dst.cell(row=cell.row, column=cell.column, value=cell.value)
-                if cell.has_style:
-                    new_cell.font      = copy(cell.font)
-                    new_cell.border    = copy(cell.border)
-                    new_cell.fill      = copy(cell.fill)
-                    new_cell.number_format = cell.number_format
-                    new_cell.protection  = copy(cell.protection)
-                    new_cell.alignment = copy(cell.alignment)
+        # 不要シートをすべて削除（座席番号コピー以外）
+        for sname in list(wb.sheetnames):
+            if sname != date_str:
+                del wb[sname]
 
         # ── X列(24列)行7-18の塗り・Y列(25列)行7-12の値をクリア ──
-        from openpyxl.styles import PatternFill as PF
-        NO_FILL = PF(fill_type=None)
         for r in range(7, 19):
-            cell = ws_dst.cell(row=r, column=24)
-            cell.fill  = PF(fill_type=None)
-            cell.value = None
+            ws_dst.cell(row=r, column=24).fill  = PF(fill_type=None)
+            ws_dst.cell(row=r, column=24).value = None
         for r in range(7, 13):
-            cell = ws_dst.cell(row=r, column=25)
-            cell.value = None
-            cell.fill  = PF(fill_type=None)
+            ws_dst.cell(row=r, column=25).value = None
+            ws_dst.cell(row=r, column=25).fill  = PF(fill_type=None)
 
-        # ── 全セルにフォント11pt・中央揃えを適用 ──
-        from openpyxl.styles import Font, Alignment
+        # ── 全セルにフォント11pt・中央揃えを適用（フォントキャッシュで高速化）──
         CENTER = Alignment(horizontal="center", vertical="center")
+        FONT_CACHE = {}
         for row in ws_dst.iter_rows():
             for cell in row:
-                # フォントサイズだけ11ptに（太字・色などは元のまま保持）
-                orig_font = cell.font
-                cell.font = Font(
-                    name=orig_font.name or "Calibri",
-                    size=11,
-                    bold=orig_font.bold,
-                    italic=orig_font.italic,
-                    color=orig_font.color,
-                )
+                orig = cell.font
+                try:
+                    rgb = orig.color.rgb if orig.color and orig.color.type == 'rgb' else None
+                except Exception:
+                    rgb = None
+                key = (orig.name, orig.bold, orig.italic, rgb)
+                if key not in FONT_CACHE:
+                    FONT_CACHE[key] = Font(
+                        name=orig.name or "Calibri", size=11,
+                        bold=orig.bold, italic=orig.italic, color=orig.color,
+                    )
+                cell.font = FONT_CACHE[key]
                 cell.alignment = CENTER
 
         # ── 列幅・行高の設定 ──
@@ -306,9 +294,6 @@ if run:
         for row, rd in ws_src.row_dimensions.items():
             ws_dst.row_dimensions[row].height = rd.height
 
-        # 結合セルをコピー
-        for merge in ws_src.merged_cells.ranges:
-            ws_dst.merge_cells(str(merge))
 
         out_buf = io.BytesIO()
         wb_out.save(out_buf)

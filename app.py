@@ -155,23 +155,42 @@ if run:
         wb = openpyxl.load_workbook(excel_bytes)
 
         # シート名を自動判別（25-26 / 26-27 両対応）
+        # シート名を自動判別（25-26 / 26-27 両対応）
+        # パターン: (座席番号, 列, クラス, オーナーズシート or None)
         SHEET_PATTERNS = [
-            # (座席番号, 列, クラス)
-            ('25－26ブロックマップ_座席番号', '25－26ブロックマップ_列', '25－26ブロックマップ_クラス'),
-            ('26-27ブロックマップ案_席番号',  '26-27ブロックマップ案_列', '26-27ブロックマップ案_クラス'),
+            ('25－26ブロックマップ_座席番号', '25－26ブロックマップ_列', '25－26ブロックマップ_クラス', None),
+            ('26-27ブロックマップ案_席番号',  '26-27ブロックマップ案_列', '26-27ブロックマップ案_クラス', '26-27ブロックマップ案_オーナーズシート'),
         ]
         matched_pattern = None
         for pattern in SHEET_PATTERNS:
-            if all(s in wb.sheetnames for s in pattern):
+            if all(s in wb.sheetnames for s in pattern[:3]):
                 matched_pattern = pattern
                 break
         if matched_pattern is None:
             st.error(f"対応するシートが見つかりません。シート一覧: {wb.sheetnames}")
             st.stop()
 
-        ws_seat  = wb[matched_pattern[0]]
-        ws_row   = wb[matched_pattern[1]]
-        ws_class = wb[matched_pattern[2]]
+        ws_seat   = wb[matched_pattern[0]]
+        ws_row    = wb[matched_pattern[1]]
+        ws_class  = wb[matched_pattern[2]]
+        ws_owner  = wb[matched_pattern[3]] if matched_pattern[3] else None
+        is_2627   = ws_owner is not None
+
+        # 26-27の場合：赤セルのみが対象。赤セル座標をセットとして保持
+        if is_2627:
+            red_coords = set()
+            for row in ws_owner.iter_rows():
+                for cell in row:
+                    if cell.fill and cell.fill.fill_type == 'solid':
+                        rgb = cell.fill.fgColor.rgb
+                        try:
+                            r = int(rgb[2:4], 16)
+                            g = int(rgb[4:6], 16)
+                            b = int(rgb[6:8], 16)
+                            if r > 180 and g < 100 and b < 100:
+                                red_coords.add((cell.row, cell.column))
+                        except:
+                            pass
 
         BLUE_FILL = PatternFill("solid", fgColor="0000FF")
 
@@ -203,20 +222,31 @@ if run:
                 coord_map[(cv_norm, rv_int, sv_int)] = (r, c)
 
         # 突合＆塗り
-        matched = []
+        matched   = []
         unmatched = []
+        not_red   = []  # 26-27専用：赤色でなかった席
 
         for (class_name, row_num, seat_num) in seats:
             key = (normalize_class(class_name), row_num, seat_num)
             if key in coord_map:
                 r, c = coord_map[key]
-                ws_seat.cell(row=r, column=c).fill = BLUE_FILL
-                matched.append({
-                    "クラス": class_name,
-                    "列": row_num,
-                    "座席": seat_num,
-                    "セル": f"R{r}C{c}"
-                })
+                if is_2627 and (r, c) not in red_coords:
+                    # 赤色でないセルはエラー扱い
+                    not_red.append({
+                        "クラス": class_name,
+                        "列": row_num,
+                        "座席": seat_num,
+                    })
+                else:
+                    ws_seat.cell(row=r, column=c).fill = BLUE_FILL
+                    if is_2627:
+                        ws_owner.cell(row=r, column=c).fill = BLUE_FILL
+                    matched.append({
+                        "クラス": class_name,
+                        "列": row_num,
+                        "座席": seat_num,
+                        "セル": f"R{r}C{c}"
+                    })
             else:
                 unmatched.append({
                     "クラス": class_name,
@@ -230,7 +260,8 @@ if run:
         from openpyxl.utils import column_index_from_string, get_column_letter
         from copy import copy as style_copy
 
-        ws_src = ws_seat
+        # 26-27はオーナーズシートをベースに出力
+        ws_src = ws_owner if is_2627 else ws_seat
         wb_out = Workbook()
         wb_out.remove(wb_out.active)
         ws_dst = wb_out.create_sheet(date_str)
@@ -260,13 +291,14 @@ if run:
                     new_cell.fill          = style_copy(cell.fill)
                     new_cell.number_format = cell.number_format
 
-        # ── X列(24列)行7-18の塗り・Y列(25列)行7-12の値をクリア ──
-        for r in range(7, 19):
-            ws_dst.cell(row=r, column=24).fill  = PF(fill_type=None)
-            ws_dst.cell(row=r, column=24).value = None
-        for r in range(7, 13):
-            ws_dst.cell(row=r, column=25).value = None
-            ws_dst.cell(row=r, column=25).fill  = PF(fill_type=None)
+        # ── X列(24列)行7-18の塗り・Y列(25列)行7-12の値をクリア（25-26のみ）──
+        if not is_2627:
+            for r in range(7, 19):
+                ws_dst.cell(row=r, column=24).fill  = PF(fill_type=None)
+                ws_dst.cell(row=r, column=24).value = None
+            for r in range(7, 13):
+                ws_dst.cell(row=r, column=25).value = None
+                ws_dst.cell(row=r, column=25).fill  = PF(fill_type=None)
 
         # ── 結合セルをコピー ──
         for merge in ws_src.merged_cells.ranges:
@@ -341,6 +373,11 @@ if run:
             st.caption("クラス名・列・座席番号がデータに存在しない可能性があります")
         else:
             st.success("すべての座席が一致しました！")
+
+    if not_red:
+        st.subheader(f"⚠️ オーナーズシート対象外の席（{len(not_red)}件）")
+        st.dataframe(not_red, use_container_width=True)
+        st.caption("オーナーズシートで赤色になっていない席のため、青塗りをスキップしました")
 
     st.download_button(
         label="⬇️ 出力Excelをダウンロード",

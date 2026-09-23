@@ -77,8 +77,13 @@ def parse_seat_text(text):
 
 
 def normalize_class(s):
-    """連続スペースを1つにして比較用に正規化"""
-    return re.sub(r'\s+', ' ', str(s).strip())
+    """スペース・ハイフンを統一して比較用に正規化（25-26/26-27 両対応）"""
+    s = re.sub(r'\s+', ' ', str(s).strip())
+    # ハイフンをスペースに統一して比較（Class S-Side → Class S Side）
+    s = s.replace('-', ' ')
+    # 連続スペースを再度整理
+    s = re.sub(r'\s+', ' ', s)
+    return s
 
 
 # ─────────────────────────────────────────────
